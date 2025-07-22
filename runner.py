@@ -169,19 +169,31 @@ def compute_cache_logits(image_features,
 
         # 拼接所有缓存图像特征为 [N, D]，然后转置为 [D, N]
         cache_keys = torch.cat(cache_keys, dim=0).permute(1, 0)
+        # 如果启用阈值过滤
         if neg_mask_thresholds:
+            # torch.cat(..., dim=0) 把它们拼成一个 [N, D] 的 tensor
             cache_values = torch.cat(cache_values, dim=0)
+            # 阈值过滤 (val > th0) & (val < th1) 得到 [N, D] 的 mask，过滤缓存中不可靠的特征维度
+            # 随后将 bool 类型转成 int8（0 或 1），再转成 float16 并搬到 GPU
             cache_values = (((cache_values > neg_mask_thresholds[0]) &
                              (cache_values < neg_mask_thresholds[1])).type(
                                  torch.int8)).cuda().half()
         else:
+            # F.one_hot(...) → [N, C]：将每个类别索引转换成 one-hot 标签
+            # .cuda().half()：转为 float16 并搬到 CUDA
             cache_values = (F.one_hot(
                 torch.Tensor(cache_values).to(torch.int64),
                 num_classes=clip_weights.size(1))).cuda().half()
-
+        # 当前图像特征与 N 个缓存样本的特征向量相乘后得到每个缓存样本与该图像的相似度
+        # affinity.shape == [1, N]
         affinity = image_features @ cache_keys
+        # beta - beta * affinity = beta * (1 - affinity) 越相似的 affinity 趋近于 1，这项趋近于 0；越不相似的 affinity 趋近于 0，这项趋近于 beta
+        # (-1 * ...).exp() = exp(beta * (affinity - 1)) 使得越相似的 affinity 得到的权重越大（接近 1），越不相似的权重接近 0
+        # cache_logits = weight @ cache_values 是一个典型的加权平均操作
         cache_logits = ((-1) * (beta - beta * affinity)).exp() @ cache_values
         # return alpha * cache_logits, affinity
+        # 最后输出一个加权后的向量（特征或伪 logit），乘以调节系数 alpha
+        # 返回值 shape 保持为 [1, D]
         return alpha * cache_logits
 
 
