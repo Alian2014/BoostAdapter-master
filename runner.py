@@ -17,8 +17,9 @@ from utils import AverageMeter
 import time
 import copy
 
-
-# 函数 get_plpd_image(x) 主要的作用是对图像进行局部 patch 打乱重排
+'''
+get_plpd_image(x) 主要的作用是对图像进行局部 patch 打乱重排
+'''
 def get_plpd_image(x):
     import torchvision
     from einops import rearrange
@@ -49,8 +50,9 @@ def get_plpd_image(x):
     x = resize_o(x)
     return x
 
-
-# 命令行参数解析函数，从命令行读取和解析参数，返回一个包含所有参数的 args 对象
+'''
+get_arguments() 为命令行参数解析函数，从命令行读取和解析参数，返回一个包含所有参数的 args 对象
+'''
 def get_arguments():
     """Get arguments of the test-time adaptation."""
     # 实例化对象，parser.add_argument 用于向命令行解析器添加参数规则
@@ -104,8 +106,10 @@ def get_arguments():
 
     return args
 
-
-# 缓存更新函数，将某个类别 pred 对应的新样本（包含其特征与损失信息）加入缓存中，并按照容量上限进行替换策略管理
+'''
+update_cache(...)为缓存更新函数，
+将某个类别 pred 对应的新样本（包含其特征与损失信息）加入缓存中，并按照容量上限进行替换策略管理
+'''
 def update_cache(cache,
                  pred,
                  features_loss,
@@ -138,8 +142,16 @@ def update_cache(cache,
         else:
             cache[pred] = [item]
 
+'''
+compute_cache_logits(...) 是典型的 基于缓存（cache）的 logit 计算模块
 
-# 这段函数 compute_cache_logits(...) 是典型的 基于缓存（cache）的 logit 计算模块
+image_features：Tensor [1, D]：当前待分类图像的特征（经过 CLIP 编码）
+cache：dict：缓存数据结构 {class_id: List[(feat, prob, entropy)]}
+alpha：float：权重系数，控制 cache logits 对最终 logits 的影响程度
+beta：float：缩放系数，控制特征相似度放大（用于 softmax sharpness）
+clip_weights：Tensor [C, D]	：所有类别的 prompt 特征，用于对齐维度（有时用于 fallback）
+neg_mask_thresholds：Tuple[float, float] or None：仅在负缓存启用时，表示用于掩蔽筛选缓存样本的概率/熵范围
+'''
 def compute_cache_logits(image_features,
                          cache,
                          alpha,
@@ -196,28 +208,43 @@ def compute_cache_logits(image_features,
         # 返回值 shape 保持为 [1, D]
         return alpha * cache_logits
 
+'''
+run_test_tda(...) 用于测试 TDA 在分类任务中的准确率
 
+pos_cfg, neg_cfg：用于构建正负样本缓存的配置
+loader：PyTorch 的 DataLoader 对象，加载测试集 
+clip_model：CLIP 模型（或其变体），用来提取图像特征
+clip_model：CLIP 模型（或其变体），用来提取图像特征
+logger：日志记录器
+args, cfg：其他控制参数或配置对象
+'''
 def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
                  args, cfg):
+    # 用于统计和更新测试过程中每个 batch 的 Top-1 准确率
     top1 = AverageMeter('Acc@1', ':6.2f', Summary.AVERAGE)
+    # 同样是 AverageMeter，统计每个 batch 的耗时
     batch_time = AverageMeter('Time', ':6.3f', Summary.AVERAGE)
+    # ProgressMeter：也是一个辅助类，用于打印每个 batch 的进度、准确率等信息  
     progress = ProgressMeter(len(loader), [top1], prefix='Test: ')
 
     with torch.no_grad():
+        
         pos_cache, neg_cache, accuracies = {}, {}, []
 
         #Unpack all hyperparameters
+        # 解包配置中的开关状态,从配置字典 pos_cfg, neg_cfg 中读取是否启用对应缓存机制
         pos_enabled, neg_enabled = pos_cfg['enabled'], neg_cfg['enabled']
-
+        # 纯 CLIP 模式，禁用缓存机制
         if args.mode in ["clip"]:
             pos_enabled = False
             neg_enabled = False
-
+        # 如果启用正缓存，提取 pos_cfg 中的主要参数
         if pos_enabled:
             pos_params = {
                 k: pos_cfg[k]
                 for k in ['shot_capacity', 'alpha', 'beta']
             }
+        # 如果启用负缓存，额外会多两个筛选参数
         if neg_enabled:
             neg_params = {
                 k: neg_cfg[k]
@@ -226,10 +253,12 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
                     'mask_threshold'
                 ]
             }
-
-        end = time.time()
+        # 用于后续统计 batch 推理耗时
+        end = time.time() 
         #Test-time adaptation
+        # 遍历测试集 loader，每次取出一批 images 和其真实标签 target，在遍历同时解包
         for idx, (images, target) in enumerate(loader):
+            # infer_ori_image 是布尔值，决定是否对“原始图像”执行更细致的推理，判断依据是 args.datasets 是否在某些数据集名字符串中
             infer_ori_image = args.datasets in "caltech101/dtd/eurosat/fgvc/food101/oxford_flowers/oxford_pets/stanford_cars/sun397/ucf101/ \
             contrast/jpeg/pixelate/elastic/ \
             defocus/glass/zoom/motion/ \
@@ -238,14 +267,26 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
             fog/frost/snow/brightness"
 
             # infer_ori_image = True
+            # 获取图像特征与 CLIP 输出
             image_features, clip_logits, loss, prob_map, pred, ori_feat, ori_output = get_clip_logits(
                 images,
                 clip_model,
                 clip_weights,
                 infer_ori_image=infer_ori_image)
+            # 将 target 移到 GPU 上，get_entropy() 可能是根据 loss 或 clip_logits 计算预测分布的不确定性（熵）
             target, prop_entropy = target.cuda(), get_entropy(
                 loss, clip_weights)
+            '''
+            如果启用 positive cache，就调用 update_cache() 更新缓存
+            
+            pred: 当前预测的类别；
 
+            [image_features, loss]: 要缓存的特征和其对应的不确定性（可用于排序）；
+
+            shot_capacity: 每类最多缓存多少个样本；
+
+            fifo=False: 是否使用 FIFO 缓存替换策略（这里禁用 FIFO，可能采用熵排序或覆盖最低质量样本）
+            '''
             if pos_enabled:
                 if args.mode in ["tda"]:
                     update_cache(pos_cache,
@@ -257,59 +298,79 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
                                  pred, [image_features, loss],
                                  pos_params['shot_capacity'],
                                  fifo=False)
-
+                # BoostAdapter 模式下进行高置信样本筛选并构建增强缓存
                 if args.mode in ["boostadapter"]:
+                    # 筛选最有信心的前 10% 样本,返回它们的特征、输出 logits、索引
                     select_feat, select_output, select_idx = select_confident_samples(
                         ori_feat, ori_output, 0.1)
+                    # 对这些 logits 计算 entropy，用于排序或衡量可信度
                     select_entropy = get_output_entropy(select_output)
-
+                    # 复制当前正缓存，用于尝试性构建增强版缓存（不会影响原缓存）
                     cur_pos_cache = copy.deepcopy(pos_cache)
+                    # 遍历筛选出来的高置信样本
                     for i in range(select_entropy.shape[0]):
+                        # 获取其预测类别 cur_pred
                         cur_pred = int(select_output[i].argmax(dim=-1).item())
+                        # 获取其特征 cur_feat
                         cur_feat = select_feat[i]
+                        # 将其加入临时缓存 cur_pos_cache 中,每类缓存容量扩展为 shot_capacity + cfg['delta']
                         update_cache(
                             cur_pos_cache,
                             cur_pred,
                             [cur_feat.unsqueeze(0), select_entropy[i].item()],
                             pos_params['shot_capacity'] + cfg['delta'],
                             fifo=False)
-
+            # 如果启用 negative cache 且当前样本的归一化熵（前面由 get_entropy() 得到）在给定的熵筛选区间
             if neg_enabled and neg_params['entropy_threshold'][
                     'lower'] < prop_entropy < neg_params['entropy_threshold'][
                         'upper']:
+                # 使用 update_cache 把 [image_features, loss, prob_map] 放入对应 pred 类别的 neg_cache 中    
                 update_cache(neg_cache, pred, [image_features, loss, prob_map],
                              neg_params['shot_capacity'], True)
 
+            # 初始 logits 仅为 CLIP 输出，用作基础
             final_logits = clip_logits.clone()
+            # 加入正缓存得分
             if pos_enabled and pos_cache:
                 if args.mode in ["tda"]:
                     final_logits += compute_cache_logits(
                         image_features, pos_cache, pos_params['alpha'],
                         pos_params['beta'], clip_weights)
                 elif args.mode in ["boostadapter"]:
+                    # BoostAdapter 中使用的是 cur_pos_cache（包含 confident 样本的扩展缓存）
                     final_logits += compute_cache_logits(
                         image_features, cur_pos_cache, pos_params['alpha'],
                         pos_params['beta'], clip_weights)
 
+            # 减去负缓存得分，这样能有效抑制误分类倾向（比如视觉相似但语义不同的类别）
             if neg_enabled and neg_cache:
                 final_logits -= compute_cache_logits(
                     image_features, neg_cache, neg_params['alpha'],
                     neg_params['beta'], clip_weights,
                     (neg_params['mask_threshold']['lower'],
                      neg_params['mask_threshold']['upper']))
-
+            
+            # 使用最终融合后的 final_logits 进行分类
             acc = cls_acc(final_logits, target)
+            # 将该 batch 的准确率加入 accuracies 列表，供最后汇总
             accuracies.append(acc)
+            # 疑似多余
             end = time.time()
-
+            
+            # 更新累计准确率统计器 top1
             top1.update(acc, 1)
+            # 更新 batch 时间
             batch_time.update(time.time() - end, 1)
+            # 重置 end，供下个 batch 计时使用
             end = time.time()
 
+            # 每处理一个 batch（% 1 == 0）就输出当前进度
             if idx % 1 == 0:
                 progress.display(idx, logger)
+        # 输出所有 batch 的平均结果
         progress.display_summary(logger)
 
+        # 最终返回该轮测试的准确率均值
         return sum(accuracies) / len(accuracies)
 
 
