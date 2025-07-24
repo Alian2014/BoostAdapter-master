@@ -375,19 +375,26 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
 
 
 def main():
+    # 限制 PyTorch 使用的 CPU 线程数为 8
     torch.set_num_threads(8)
+    # 调用 get_arguments()，解析命令行参数
     args = get_arguments()
+    # 获取配置文件路径
     config_path = args.config
 
     # Initialize CLIP model
+    # 从 args.backbone 指定路径加载 CLIP 模型 和对应图像预处理方法
     model_path = args.backbone
     clip_model, preprocess = clip.load(model_path)
+    # 将模型设为推理模式，关闭 dropout 等
     clip_model.eval()
 
     # Set random seed
+    # 设置随机种子（保证实验可复现）
     random.seed(1)
     torch.manual_seed(1)
 
+    # 定义日志格式并输出到终端
     fmt = "[{time: MM-DD hh:mm:ss}] {message}"
     config = {
         "handlers": [
@@ -397,35 +404,47 @@ def main():
             },
         ],
     }
+    # 相当于重设 loguru 的日志管道，只保留我们设定的这个 sink
     logger.configure(**config)
 
+    # 根据实验名判断是“搜索”类任务还是“评估”任务，并选择日志路径
     if "search" in args.exp_name:
         file_root = f"log/search/{args.datasets}/"
     else:
         file_root = f"log/eval/{args.datasets}/"
     file_path = f"{file_root}/{args.exp_name}.txt"
+    # 若日志目录不存在则创建
     if not os.path.exists(file_root):
         os.makedirs(file_root)
+    # 若该实验日志已存在，直接跳过运行
     if os.path.exists(file_path):
         print("Experiment exists. Skipping...")
         exit()
+    # 否则创建空文件，并将日志记录输出重定向到该文件
     open(file_path, 'w').close()
+    # 将实际运行日志写入这个文件
     logger.add(file_path, format=fmt)
 
     # Run TDA on each dataset
+    # 支持多个数据集（通过 / 分隔），逐个处理
     datasets = args.datasets.split('/')
     for dataset_name in datasets:
         logger.info(f"Processing {dataset_name} dataset.")
 
+        # 使用 get_config_file() 加载该数据集的配置（包含正负样本数、阈值等）
         cfg = get_config_file(config_path, dataset_name)
+        # 输出命令行参数和配置内容
         logger.info(args)
         logger.info("\nRunning dataset configurations:")
         logger.info(cfg)
 
+        # build_test_data_loader()：加载测试图像数据、类别名称、prompt 模板
         test_loader, classnames, template = build_test_data_loader(
             dataset_name, args.data_root, preprocess, args)
+        # clip_classifier()：基于类别名和 prompt 模板，使用 CLIP 的 encode_text() 得到每个类别的特征向量（class centers）
         clip_weights = clip_classifier(classnames, template, clip_model)
 
+        # 执行 TDA 评估流程，并将评估结果记录在日志中
         acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader,
                            clip_model, clip_weights, logger, args, cfg)
 
