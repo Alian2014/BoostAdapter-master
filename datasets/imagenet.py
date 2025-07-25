@@ -178,29 +178,43 @@ imagenet_templates = ["itap of a {}.",
                         "art of the {}.",
                         "a photo of the small {}."]
 
+'''
+ImageNet 类代码是一个很好的封装，用于构建 ImageNet 的标准测试集（validation set）数据加载器，
+并附带模板和类名信息，适配 CLIP 这类 zero-shot 模型使用
+'''
 class ImageNet():
-
+    # 设置默认子目录名，方便拼接路径
     dataset_dir = 'imagenet'
 
+    '''
+    root: 数据集根目录，例如 /data/
+    preprocess: 图像预处理方法（transforms.Compose([...])）
+    '''
     def __init__(self, root, preprocess):
-
+        # 这两行构造了 /data/imagenet/images 的路径
         self.dataset_dir = os.path.join(root, self.dataset_dir)
         self.image_dir = os.path.join(self.dataset_dir, 'images')
 
         test_preprocess = preprocess
         
+        # 将目标位置的数据集加载为验证集
         self.test = torchvision.datasets.ImageNet(self.image_dir, split='val', transform=test_preprocess)
         
+        # 语义提示列表
         self.template = imagenet_templates
+        # 类名列表
         self.classnames = imagenet_classes
     
     def read_classnames(text_file):
         """Return a dictionary containing
         key-value pairs of <folder name>: <class name>.
         """
+        # 读取一个包含 <folder> <class name> 的文本文件，输出为一个 OrderedDict 映射
         classnames = OrderedDict()
+        # 读取文本文件的所有行
         with open(text_file, "r") as f:
             lines = f.readlines()
+            # 构造字典，返回一个图片-类别映射的字典
             for line in lines:
                 line = line.strip().split(" ")
                 folder = line[0]

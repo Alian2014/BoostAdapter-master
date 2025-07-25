@@ -104,7 +104,8 @@ def cls_acc(output, target, topk=1):
     return acc
 
 '''
-clip_classifier(...) 是用来构造一个 Zero-Shot CLIP 分类器的权重向量矩阵
+clip_classifier(...) 是用获取每个类别的 Text Embedding，构造一个Text Embedding（类中心原型）矩阵，
+可直接用于与图像 embedding 做 logits = image_feat @ clip_weights
 
 classnames: 一个类名列表，如 ["dog", "cat", "airplane"]
 template: 一个 prompt 模板列表，如 ["a photo of a {}.", "a picture of a {}."]
@@ -135,7 +136,7 @@ def clip_classifier(classnames, template, clip_model):
 
         # 把 [num_classes] 个 [D] 向量堆叠成一个二维张量,把堆叠后的权重张量移动到 GPU 上
         clip_weights = torch.stack(clip_weights, dim=1).cuda()
-    # 返回形状为 [embedding_dim, num_classes] 的 CLIP 分类器权重矩阵
+    # 返回形状为 [embedding_dim, num_classes] 的 Text Embedding（类中心原型）矩阵
     return clip_weights
 
 '''
@@ -199,8 +200,8 @@ def get_clip_logits(images, clip_model, clip_weights, infer_ori_image=False):
         return image_features, clip_logits, loss, prob_map, pred, ori_feat, ori_output
 
 '''
-get_ood_preprocess(args) 是一个构造图像增强（或多视图）预处理管道的函数
-
+get_ood_preprocess(args) 根据 CLIP 的要求构造一套增强逻辑，输入一张 PIL 图像，
+输出多视图（views）的增强图像，用于 OOD 测试时的鲁棒性评估或不确定性分析
 '''
 def get_ood_preprocess(args):
     # 这组均值/标准差是 OpenAI CLIP 模型预训练所用的图像归一化参数
@@ -280,13 +281,25 @@ args：其他控制参数（如 args.views）
 def build_test_data_loader(dataset_name, root_path, preprocess, args):
     # 用自定义 ImageNet 类加载数据
     if dataset_name == 'I':
+        # 返回一个图像-类别映射字典
         dataset = ImageNet(root_path, preprocess)
+        # 创建一个 PyTorch 的 DataLoader 类实例，用于批量加载测试图像数据 dataset.test
+        '''
+        dataset.test：PyTorch 的 Dataset 实例，测试集图像
+        batch_size=1：每个 batch 的图像数量，1张一批
+        num_workers=4：加载图像的子进程数，并行加载加快 IO 速度
+        shuffle=True：是否打乱样本顺序，测试时一般为 False（这里设为 True 可能用于数据增强随机性）
+        '''
         test_loader = torch.utils.data.DataLoader(dataset.test, batch_size=1, num_workers=4, shuffle=True)
     
     # 使用专门的 OOD 图像增强器：get_ood_preprocess(args)
+    # OOD（Out-of-Distribution）数据集：和模型训练时所见数据分布不同的数据，用来测试模型在陌生场景下的表现（泛化能力、鲁棒性、不确定性等）
     elif dataset_name in ['A','V','R','S']:
+        # 用专门的 OOD 图像增强器生成图像增强类实例
         preprocess = get_ood_preprocess(args)
+        # 返回对应的数据集类实例
         dataset = build_dataset(f"imagenet-{dataset_name.lower()}", root_path)
+        # 根据数据集实例和图像增强方法，返回一个可迭代的 DataLoader
         test_loader = build_data_loader(data_source=dataset.test, batch_size=1, is_train=False, tfm=preprocess, shuffle=True)
     
     # 使用 get_cross_dataset_preprocess() 构造跨数据集视图增强器

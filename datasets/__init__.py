@@ -13,7 +13,7 @@ from .imagenet_a import ImageNetA
 from .imagenet_r import ImageNetR
 from .imagenet_sketch import ImageNetSketch
 
-
+# 工厂映射表,字典的一种，key 依然为字符，但 value 为类，用于动态构造对象
 dataset_list = {
                 "oxford_pets": OxfordPets,
                 "eurosat": EuroSAT,
@@ -31,6 +31,9 @@ dataset_list = {
                 "imagenet-s": ImageNetSketch,
                 }
 
-
+'''
+build_dataset(...) 根据数据集名称（字符串）返回一个封装好的数据集类实例
+'''
 def build_dataset(dataset, root_path):
+    # 利用工厂映射，动态初始化对应的类实例，返回对应的数据集类
     return dataset_list[dataset](root_path)

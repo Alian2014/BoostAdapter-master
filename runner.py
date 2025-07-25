@@ -383,7 +383,7 @@ def main():
     config_path = args.config
 
     # Initialize CLIP model
-    # 从 args.backbone 指定路径加载 CLIP 模型 和对应图像预处理方法
+    # 从 args.backbone 指定路径加载 CLIP 模型和对应图像预处理方法
     model_path = args.backbone
     clip_model, preprocess = clip.load(model_path)
     # 将模型设为推理模式，关闭 dropout 等

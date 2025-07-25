@@ -252,7 +252,19 @@ class DatasetBase:
         return output
 
 
+'''
+DatasetWrapper(TorchDataset)：将原始数据集 data_source 包装成标准的 PyTorch Dataset 接口，
+并支持图像读取 + 多视图增强 + label 提取 + CLIP 标准归一化处理。
+'''
 class DatasetWrapper(TorchDataset):
+    '''
+    data_source: 原始的数据集对象（必须是一个支持 __getitem__ 和 __len__ 的对象，且每个样本包含 .impath, .label, .domain 字段）
+    input_size: 目标图像尺寸（如 224）
+    transform: 图像增强方法（可以是单个，也可以是 list/tuple）
+    is_train: 是否是训练集（影响是否允许 k_tfm > 1 多次增强）
+    return_img0: 是否返回未经 transform 的原始图像
+    k_tfm: 每张图是否增强 k 次（用于多视图，如 TTA、AugMix）
+    '''
     def __init__(self, data_source, input_size, transform=None, is_train=False,
                  return_img0=False, k_tfm=1):
         self.data_source = data_source
@@ -262,6 +274,7 @@ class DatasetWrapper(TorchDataset):
         self.k_tfm = k_tfm if is_train else 1
         self.return_img0 = return_img0
 
+        # 防止没有传 transform 却要增强多次（k_tfm > 1）
         if self.k_tfm > 1 and transform is None:
             raise ValueError(
                 'Cannot augment the image {} times '
@@ -269,6 +282,7 @@ class DatasetWrapper(TorchDataset):
             )
 
         # Build transform that doesn't apply any data augmentation
+        # 构造一个 “无增强的默认 transform”（用于原图 img0 的转换）
         interp_mode = T.InterpolationMode.BICUBIC
         to_tensor = []
         to_tensor += [T.Resize(input_size, interpolation=interp_mode)]
@@ -278,11 +292,14 @@ class DatasetWrapper(TorchDataset):
         )
         to_tensor += [normalize]
         self.to_tensor = T.Compose(to_tensor)
-
+        
+    # 数据集大小
     def __len__(self):
         return len(self.data_source)
 
+    # 核心数据获取逻辑
     def __getitem__(self, idx):
+        # 每个样本应该是一个数据集类实例
         item = self.data_source[idx]
 
         output = {
@@ -290,26 +307,35 @@ class DatasetWrapper(TorchDataset):
             'domain': item.domain,
             'impath': item.impath
         }
-
+        
+        # 从数据集类实例中获取图像数据
         img0 = read_image(item.impath)
 
+        # 如果图像增强输入不为空
         if self.transform is not None:
+            # self.transform 是一个 list/tuple
             if isinstance(self.transform, (list, tuple)):
+                # 依次将每个 transform 应用于原始图像 img0
                 for i, tfm in enumerate(self.transform):
                     img = self._transform_image(tfm, img0)
                     keyname = 'img'
                     if (i + 1) > 1:
                         keyname += str(i + 1)
                     output[keyname] = img
+            # 单一 transform 的情况
             else:
+                # 将单个 transform 应用于原始图像 img0
                 img = self._transform_image(self.transform, img0)
                 output['img'] = img
 
+        # 是否返回未经增强的原图
         if self.return_img0:
             output['img0'] = self.to_tensor(img0)
 
+        # 只返回第一个图列表（因为只有一种增强方法）和对应的标签
         return output['img'], output['label']
 
+    # 对同一张原始图像 img0 执行 k_tfm 次 指定的变换 tfm，并根据 k_tfm 的大小返回单个结果或列表结果
     def _transform_image(self, tfm, img0):
         img_list = []
 
@@ -323,6 +349,18 @@ class DatasetWrapper(TorchDataset):
         return img
 
 
+'''
+build_data_loader(...) 是一个 统一构建 PyTorch 数据加载器（DataLoader） 的封装器
+其核心是：用 DatasetWrapper 包裹数据源，然后交给 PyTorch 的 DataLoader 来处理。
+
+data_source=None,          # 通常是一个已有的 Dataset 实例，如 dataset.test
+batch_size=64,             # 每个 batch 的样本数量
+input_size=224,            # 图像输入大小（一般用于 wrapper）
+tfm=None,                  # 图像预处理 transform，如 ToTensor()+Normalize
+is_train=True,             # 训练集 or 测试集
+shuffle=False,             # 是否打乱样本顺序
+dataset_wrapper=None       # Dataset 包裹器，默认用 DatasetWrapper 类
+'''
 def build_data_loader(
     data_source=None,
     batch_size=64,
@@ -332,12 +370,18 @@ def build_data_loader(
     shuffle=False,
     dataset_wrapper=None
 ):
-
+    
+    # 设置默认包裹器
     if dataset_wrapper is None:
+        # DatasetWrapper 是你自定义的类，用于封装数据源、处理 transform、input_size、是否是训练数据等逻辑
         dataset_wrapper = DatasetWrapper
 
     # Build data loader
+    # 再传入 DataLoader，PyTorch 会根据这个 DatasetWrapper 构造一个可迭代的 DataLoader
     data_loader = torch.utils.data.DataLoader(
+        # 创建了一个 Dataset 对象
+        # 调用你自己的 DatasetWrapper 类的 __init__ 方法，并封装原始 dataset，DatasetWrapper的类方法将为 PyTorch 提供数据信息和处理方法等
+        # PyTorch 就可以用这个 wrapper 来自动迭代样本
         dataset_wrapper(data_source, input_size=input_size, transform=tfm, is_train=is_train),
         batch_size=batch_size,
         num_workers=8,
@@ -345,8 +389,20 @@ def build_data_loader(
         drop_last=False,
         pin_memory=(torch.cuda.is_available())
     )
+    # 用于确保你没有传入空的 dataset.test，避免训练时报错
     assert len(data_loader) > 0
 
+    '''
+    PyTorch 会根据这个 DatasetWrapper 构造一个可迭代的 DataLoader，它具有以下功能：
+    
+    batch_size=batch_size	每次迭代返回一批（batch）数据
+    num_workers=8	用 8 个子进程并行加载数据，提高 IO 吞吐
+    shuffle=shuffle	是否每个 epoch 打乱数据顺序
+    drop_last=False	如果最后一批不足 batch_size，是否丢弃（这里保留）
+    pin_memory=True	如果用 GPU，数据会更快复制到 CUDA
+    
+    接着作为函数返回值返回
+    '''
     return data_loader
 
 
@@ -375,21 +431,38 @@ def augmix(image, preprocess, aug_list, severity=1):
     mix = m * x_processed + (1 - m) * mix
     return mix
 
-
+'''
+AugMixAugmenter(object) 是一个 可调用的图像增强器类
+'''
 class AugMixAugmenter(object):
+    '''
+    base_transform：初步几何处理，如 Resize 和 CenterCrop
+    preprocess：ToTensor + Normalize，转换为模型可接受的格式
+    n_views：生成多少个增强图
+    augmix：是否启用 AugMix（否则只用 base_transform）
+    severity：控制 AugMix 扰动强度（越大越难）
+    '''
     def __init__(self, base_transform, preprocess, n_views=2, augmix=False, 
                     severity=1):
         self.base_transform = base_transform
         self.preprocess = preprocess
         self.n_views = n_views
+        # 若启用则应用增强操作
         if augmix:
             self.aug_list = augmentations
         else:
             self.aug_list = []
         self.severity = severity
-        
+    
+    # 这是一个可调用类，使得你可以像函数一样用它：outputs = aug(x)    
     def __call__(self, x):
+        # 对输入图像 x 首先做 base_transform（如 resize/crop）
+        # 然后 preprocess（to tensor + normalize）
+        # 得到干净的标准视图
         image = self.preprocess(self.base_transform(x))
+        # 调用外部函数 augmix(...) 来对输入图像进行多次增强
+        # 每次增强返回的是 Tensor 格式（已预处理）
         views = [augmix(x, self.preprocess, self.aug_list, self.severity) for _ in range(self.n_views)]
 
+        # 返回一个 list，共包含：原图（干净视图），n_views 个增强图像
         return [image] + views
