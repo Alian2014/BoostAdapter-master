@@ -143,7 +143,7 @@ def update_cache(cache,
             cache[pred] = [item]
 
 '''
-compute_cache_logits(...) 是典型的 基于缓存（cache）的 logit 计算模块
+compute_cache_logits(...) 是典型的基于缓存（cache）的 logit 计算模块
 
 image_features：Tensor [1, D]：当前待分类图像的特征（经过 CLIP 编码）
 cache：dict：缓存数据结构 {class_id: List[(feat, prob, entropy)]}
@@ -288,6 +288,7 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
             fifo=False: 是否使用 FIFO 缓存替换策略（这里禁用 FIFO，可能采用熵排序或覆盖最低质量样本）
             '''
             if pos_enabled:
+                # 疑似无效，实际上控制模式的是 if args.mode in ["boostadapter"]:
                 if args.mode in ["tda"]:
                     update_cache(pos_cache,
                                  pred, [image_features, loss],
@@ -301,6 +302,7 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
                 # BoostAdapter 模式下进行高置信样本筛选并构建增强缓存
                 if args.mode in ["boostadapter"]:
                     # 筛选最有信心的前 10% 样本,返回它们的特征、输出 logits、索引
+                    # 不同于 get_clip_logits(...) 图像 view 的筛选，此为完整图像样本级别的筛选
                     select_feat, select_output, select_idx = select_confident_samples(
                         ori_feat, ori_output, 0.1)
                     # 对这些 logits 计算 entropy，用于排序或衡量可信度
@@ -438,7 +440,7 @@ def main():
         logger.info("\nRunning dataset configurations:")
         logger.info(cfg)
 
-        # build_test_data_loader()：加载测试图像数据、类别名称、prompt 模板
+        # build_test_data_loader()：加载测试图像数据（可迭代的 DataLoader）、类别名称、prompt 模板
         test_loader, classnames, template = build_test_data_loader(
             dataset_name, args.data_root, preprocess, args)
         # clip_classifier()：基于类别名和 prompt 模板，使用 CLIP 的 encode_text() 得到每个类别的特征向量（class centers）

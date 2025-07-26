@@ -1,4 +1,5 @@
 #!/bin/bash
+# 删除旧的 debug.txt 文件，防止干扰当前实验
 rm -rf log/eval/*/debug.txt
 args=(
     # --mode tda
@@ -25,4 +26,7 @@ args=(
     --exp_name $2
 )
 
+#CUDA_VISIBLE_DEVICES=$1	使用第 $1 个命令行参数作为 GPU ID
+#python runner.py	        启动主程序（BoostAdapter 实验入口）
+#"${args[@]}"	            展开 args 列表作为命令行参数传入 runner.py
 CUDA_VISIBLE_DEVICES=$1 python runner.py "${args[@]}"   

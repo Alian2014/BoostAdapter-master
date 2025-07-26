@@ -186,9 +186,12 @@ def get_clip_logits(images, clip_model, clip_weights, infer_ori_image=False):
                 image_features = image_features[selected_idx].mean(0).unsqueeze(0)
                 clip_logits = output.mean(0).unsqueeze(0)
 
-                # 计算平均 entropy，预测类别，输出概率图
+                # 对这 k 张图的 logits 计算平均熵（衡量不确定性）
                 loss = avg_entropy(output)
+                # 计算平均概率分布
                 prob_map = output.softmax(1).mean(0).unsqueeze(0)
+                # 最终预测类别（取均值后 top-1）
+                # Top-1 指的是模型输出中，得分（logit 或概率）最高的那个类别
                 pred = int(output.mean(0).unsqueeze(0).topk(1, 1, True, True)[1].t())
         # 单张图像
         else:
@@ -304,8 +307,11 @@ def build_test_data_loader(dataset_name, root_path, preprocess, args):
     
     # 使用 get_cross_dataset_preprocess() 构造跨数据集视图增强器
     elif dataset_name in ['caltech101','dtd','eurosat','fgvc','food101','oxford_flowers','oxford_pets','stanford_cars','sun397','ucf101']:
+        # 构造跨数据集视图增强器
         preprocess = get_cross_dataset_preprocess(preprocess, args)
+        # 返回对应的数据集类实例
         dataset = build_dataset(dataset_name, root_path)
+        # 根据数据集实例和图像增强方法，返回一个可迭代的 DataLoader
         test_loader = build_data_loader(data_source=dataset.test, batch_size=1, is_train=False, tfm=preprocess, shuffle=True)
     
     else:
