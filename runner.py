@@ -266,8 +266,17 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
             gaussian/shot/impulse/speckle/ \
             fog/frost/snow/brightness"
 
-            # infer_ori_image = True
+            # 使用目前提供的数据集时，infer_ori_image = True 总成立
             # 获取图像特征与 CLIP 输出
+            '''
+            image_features:原图图像特征向量
+            clip_logits：原图的 zero-shot logits
+            loss：原图的 zero-shot 熵
+            prob_map：原图的 zero-shot 概率分布
+            pre：原图的 zero-shot 预测类别
+            ori_feat：原图+加强图的图像特征向量
+            ori_output：原图+加强图的 zero-shot logits
+            '''
             image_features, clip_logits, loss, prob_map, pred, ori_feat, ori_output = get_clip_logits(
                 images,
                 clip_model,
@@ -279,16 +288,16 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights, logger,
             '''
             如果启用 positive cache，就调用 update_cache() 更新缓存
             
-            pred: 当前预测的类别；
+            pred: 当前样本原图的预测的类别；
 
-            [image_features, loss]: 要缓存的特征和其对应的不确定性（可用于排序）；
+            [image_features, loss]: 要缓存的原图图像特征和其对应的 zero-shot 熵（可用于排序）；
 
             shot_capacity: 每类最多缓存多少个样本；
 
             fifo=False: 是否使用 FIFO 缓存替换策略（这里禁用 FIFO，可能采用熵排序或覆盖最低质量样本）
             '''
             if pos_enabled:
-                # 疑似无效，实际上控制模式的是 if args.mode in ["boostadapter"]:
+                # else 疑似无效:
                 if args.mode in ["tda"]:
                     update_cache(pos_cache,
                                  pred, [image_features, loss],

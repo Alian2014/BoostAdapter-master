@@ -297,7 +297,7 @@ class DatasetWrapper(TorchDataset):
     def __len__(self):
         return len(self.data_source)
 
-    # 核心数据获取逻辑
+    # 核心数据获取逻辑，每当从该类获取数据时，该函数触发
     def __getitem__(self, idx):
         # 每个样本应该是一个数据集类实例
         item = self.data_source[idx]
@@ -413,21 +413,42 @@ def get_preaugment():
         ])
 
 
+'''
+augmix() 是AugMix 数据增强方法的核心流程，具体执行图像增强操作
+
+image               # 原始图像
+preprocess          # 标准预处理操作，例如 Resize、ToTensor、Normalize 等
+aug_list            # 包含多个数据增强操作的函数列表（如旋转、模糊等）
+severity            # 图像增强操作的强度等级（severity level），其作用是控制每个数据增强函数（如模糊、噪声、颜色扰动等）的变换幅度
+'''
 def augmix(image, preprocess, aug_list, severity=1):
+    # get_preaugment() 是一个返回图像预处理函数的接口（比如统一大小、颜色空间等）
     preaugment = get_preaugment()
+    # 预处理过的“原图”
     x_orig = preaugment(image)
+    # 对原图 x_orig 应用标准预处理（如 Resize+ToTensor+Normalize），得到张量 x_processed
     x_processed = preprocess(x_orig)
+    # 如果 aug_list 是空的，则直接返回预处理后的图像
     if len(aug_list) == 0:
         return x_processed
+    # w 是从 [1,1,1] 的 狄利克雷分布采样的 3 个随机权重，和为 1，用于后续融合增强图像
     w = np.float32(np.random.dirichlet([1.0, 1.0, 1.0]))
+    # m 是从 Beta(1,1) 分布中采样的一个标量（范围在 0 到 1），用于决定“原图”和“增强图”的融合程度
     m = np.float32(np.random.beta(1.0, 1.0))
 
+    # 构造增强图并加权求和
     mix = torch.zeros_like(x_processed)
+    # 外循环做 3 个增强版本（对应 Dirichlet 的 3 个分支）
     for i in range(3):
+        # 是从原图 x_orig 开始复制
         x_aug = x_orig.copy()
+        # 随机施加 1~3 次增强操作（从 aug_list 中随机选）
         for _ in range(np.random.randint(1, 4)):
+            # 再通过标准 preprocess 转换为张量
             x_aug = np.random.choice(aug_list)(x_aug, severity)
+        # 按照权重 w[i] 加到最终混合图像 mix 中
         mix += w[i] * preprocess(x_aug)
+    # 最后将 原图 和 增强图 混合：m 越接近 1，保留越多原图信息，1 - m 越大，保留越多增强图的扰动信息
     mix = m * x_processed + (1 - m) * mix
     return mix
 
