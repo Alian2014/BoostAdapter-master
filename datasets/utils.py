@@ -27,6 +27,7 @@ def listdir_nohidden(path, sort=False):
         items.sort()
     return items
 
+
 def read_json(fpath):
     """Read json file from a path."""
     with open(fpath, 'r') as f:
@@ -59,10 +60,8 @@ def read_image(path):
             img = Image.open(path).convert('RGB')
             return img
         except IOError:
-            print(
-                'Cannot read image from {}, '
-                'probably due to heavy IO. Will re-try'.format(path)
-            )
+            print('Cannot read image from {}, '
+                  'probably due to heavy IO. Will re-try'.format(path))
 
 
 def listdir_nohidden(path, sort=False):
@@ -72,7 +71,9 @@ def listdir_nohidden(path, sort=False):
          path (str): directory path.
          sort (bool): sort the items.
     """
-    items = [f for f in os.listdir(path) if not f.startswith('.') and 'sh' not in f]
+    items = [
+        f for f in os.listdir(path) if not f.startswith('.') and 'sh' not in f
+    ]
     if sort:
         items.sort()
     return items
@@ -122,14 +123,14 @@ class DatasetBase:
     2) domain generalization
     3) semi-supervised learning
     """
-    dataset_dir = '' # the directory where the dataset is stored
-    domains = [] # string names of all domains
+    dataset_dir = ''  # the directory where the dataset is stored
+    domains = []  # string names of all domains
 
     def __init__(self, train_x=None, train_u=None, val=None, test=None):
-        self._train_x = train_x # labeled training data
-        self._train_u = train_u # unlabeled training data (optional)
-        self._val = val # validation data (optional)
-        self._test = test # test data
+        self._train_x = train_x  # labeled training data
+        self._train_u = train_u  # unlabeled training data (optional)
+        self._val = val  # validation data (optional)
+        self._test = test  # test data
 
         self._num_classes = self.get_num_classes(test)
         self._lab2cname, self._classnames = self.get_lab2cname(test)
@@ -195,10 +196,8 @@ class DatasetBase:
     def is_input_domain_valid(self, input_domains):
         for domain in input_domains:
             if domain not in self.domains:
-                raise ValueError(
-                    'Input domain must belong to {}, '
-                    'but got [{}]'.format(self.domains, domain)
-                )
+                raise ValueError('Input domain must belong to {}, '
+                                 'but got [{}]'.format(self.domains, domain))
 
     def download_data(self, url, dst, from_gdrive=True):
         if not osp.exists(osp.dirname(dst)):
@@ -221,7 +220,6 @@ class DatasetBase:
             zip_ref.close()
 
         print('File extracted to {}'.format(osp.dirname(dst)))
-
 
     def split_dataset_by_label(self, data_source):
         """Split a dataset, i.e. a list of Datum objects,
@@ -256,6 +254,8 @@ class DatasetBase:
 DatasetWrapper(TorchDataset)：将原始数据集 data_source 包装成标准的 PyTorch Dataset 接口，
 并支持图像读取 + 多视图增强 + label 提取 + CLIP 标准归一化处理。
 '''
+
+
 class DatasetWrapper(TorchDataset):
     '''
     data_source: 原始的数据集对象（必须是一个支持 __getitem__ 和 __len__ 的对象，且每个样本包含 .impath, .label, .domain 字段）
@@ -265,10 +265,16 @@ class DatasetWrapper(TorchDataset):
     return_img0: 是否返回未经 transform 的原始图像
     k_tfm: 每张图是否增强 k 次（用于多视图，如 TTA、AugMix）
     '''
-    def __init__(self, data_source, input_size, transform=None, is_train=False,
-                 return_img0=False, k_tfm=1):
+
+    def __init__(self,
+                 data_source,
+                 input_size,
+                 transform=None,
+                 is_train=False,
+                 return_img0=False,
+                 k_tfm=1):
         self.data_source = data_source
-        self.transform = transform # accept list (tuple) as input
+        self.transform = transform  # accept list (tuple) as input
         self.is_train = is_train
         # Augmenting an image K>1 times is only allowed during training
         self.k_tfm = k_tfm if is_train else 1
@@ -276,10 +282,8 @@ class DatasetWrapper(TorchDataset):
 
         # 防止没有传 transform 却要增强多次（k_tfm > 1）
         if self.k_tfm > 1 and transform is None:
-            raise ValueError(
-                'Cannot augment the image {} times '
-                'because transform is None'.format(self.k_tfm)
-            )
+            raise ValueError('Cannot augment the image {} times '
+                             'because transform is None'.format(self.k_tfm))
 
         # Build transform that doesn't apply any data augmentation
         # 构造一个 “无增强的默认 transform”（用于原图 img0 的转换）
@@ -287,12 +291,11 @@ class DatasetWrapper(TorchDataset):
         to_tensor = []
         to_tensor += [T.Resize(input_size, interpolation=interp_mode)]
         to_tensor += [T.ToTensor()]
-        normalize = T.Normalize(
-            mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)
-        )
+        normalize = T.Normalize(mean=(0.48145466, 0.4578275, 0.40821073),
+                                std=(0.26862954, 0.26130258, 0.27577711))
         to_tensor += [normalize]
         self.to_tensor = T.Compose(to_tensor)
-        
+
     # 数据集大小
     def __len__(self):
         return len(self.data_source)
@@ -307,7 +310,7 @@ class DatasetWrapper(TorchDataset):
             'domain': item.domain,
             'impath': item.impath
         }
-        
+
         # 从数据集类实例中获取图像数据
         img0 = read_image(item.impath)
 
@@ -361,16 +364,16 @@ is_train=True,             # 训练集 or 测试集
 shuffle=False,             # 是否打乱样本顺序
 dataset_wrapper=None       # Dataset 包裹器，默认用 DatasetWrapper 类
 '''
-def build_data_loader(
-    data_source=None,
-    batch_size=64,
-    input_size=224,
-    tfm=None,
-    is_train=True,
-    shuffle=False,
-    dataset_wrapper=None
-):
-    
+
+
+def build_data_loader(data_source=None,
+                      batch_size=64,
+                      input_size=224,
+                      tfm=None,
+                      is_train=True,
+                      shuffle=False,
+                      dataset_wrapper=None):
+
     # 设置默认包裹器
     if dataset_wrapper is None:
         # DatasetWrapper 是你自定义的类，用于封装数据源、处理 transform、input_size、是否是训练数据等逻辑
@@ -382,16 +385,17 @@ def build_data_loader(
         # 创建了一个 Dataset 对象
         # 调用你自己的 DatasetWrapper 类的 __init__ 方法，并封装原始 dataset，DatasetWrapper的类方法将为 PyTorch 提供数据信息和处理方法等
         # PyTorch 就可以用这个 wrapper 来自动迭代样本
-        dataset_wrapper(data_source, input_size=input_size, transform=tfm, is_train=is_train),
+        dataset_wrapper(data_source,
+                        input_size=input_size,
+                        transform=tfm,
+                        is_train=is_train),
         batch_size=batch_size,
         num_workers=8,
         shuffle=shuffle,
         drop_last=False,
-        pin_memory=(torch.cuda.is_available())
-    )
+        pin_memory=(torch.cuda.is_available()))
     # 用于确保你没有传入空的 dataset.test，避免训练时报错
     assert len(data_loader) > 0
-
     '''
     PyTorch 会根据这个 DatasetWrapper 构造一个可迭代的 DataLoader，它具有以下功能：
     
@@ -406,11 +410,20 @@ def build_data_loader(
     return data_loader
 
 
+'''
+get_preaugment()，返回一个组合增强操作，常用于深度学习训练阶段的图像预处理 pipeline
+'''
+
+
 def get_preaugment():
+    # transforms.Compose 用于将多个图像变换按顺序组合成一个整体 transform
+    # 返回的是一个可以作用于 PIL 图像或 Tensor 的可调用对象
     return transforms.Compose([
-            RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-        ])
+        # 随机裁剪图像的一部分，并缩放到 224×224 尺寸
+        RandomResizedCrop(224),
+        # 以 0.5 概率将图像左右翻转
+        transforms.RandomHorizontalFlip(),
+    ])
 
 
 '''
@@ -421,6 +434,8 @@ preprocess          # 标准预处理操作，例如 Resize、ToTensor、Normali
 aug_list            # 包含多个数据增强操作的函数列表（如旋转、模糊等）
 severity            # 图像增强操作的强度等级（severity level），其作用是控制每个数据增强函数（如模糊、噪声、颜色扰动等）的变换幅度
 '''
+
+
 def augmix(image, preprocess, aug_list, severity=1):
     # get_preaugment() 是一个返回图像预处理函数的接口（比如统一大小、颜色空间等）
     preaugment = get_preaugment()
@@ -452,9 +467,12 @@ def augmix(image, preprocess, aug_list, severity=1):
     mix = m * x_processed + (1 - m) * mix
     return mix
 
+
 '''
 AugMixAugmenter(object) 是一个 可调用的图像增强器类
 '''
+
+
 class AugMixAugmenter(object):
     '''
     base_transform：初步几何处理，如 Resize 和 CenterCrop
@@ -463,8 +481,13 @@ class AugMixAugmenter(object):
     augmix：是否启用 AugMix（否则只用 base_transform）
     severity：控制 AugMix 扰动强度（越大越难）
     '''
-    def __init__(self, base_transform, preprocess, n_views=2, augmix=False, 
-                    severity=1):
+
+    def __init__(self,
+                 base_transform,
+                 preprocess,
+                 n_views=2,
+                 augmix=False,
+                 severity=1):
         self.base_transform = base_transform
         self.preprocess = preprocess
         self.n_views = n_views
@@ -474,8 +497,8 @@ class AugMixAugmenter(object):
         else:
             self.aug_list = []
         self.severity = severity
-    
-    # 这是一个可调用类，使得你可以像函数一样用它：outputs = aug(x)    
+
+    # 这是一个可调用类，使得你可以像函数一样用它：outputs = aug(x)
     def __call__(self, x):
         # 对输入图像 x 首先做 base_transform（如 resize/crop）
         # 然后 preprocess（to tensor + normalize）
@@ -483,7 +506,10 @@ class AugMixAugmenter(object):
         image = self.preprocess(self.base_transform(x))
         # 调用外部函数 augmix(...) 来对输入图像进行多次增强
         # 每次增强返回的是 Tensor 格式（已预处理）
-        views = [augmix(x, self.preprocess, self.aug_list, self.severity) for _ in range(self.n_views)]
+        views = [
+            augmix(x, self.preprocess, self.aug_list, self.severity)
+            for _ in range(self.n_views)
+        ]
 
         # 返回一个 list，共包含：原图（干净视图），n_views 个增强图像
         return [image] + views
